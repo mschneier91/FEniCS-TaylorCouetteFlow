@@ -11,27 +11,27 @@ from os import sys
 
 #Construct Mesh
 outer_top_radius = 1.
-outer_bot_radius = 1.
+outer_bot_radius = outer_top_radius
 inner_top_radius = .5
-inner_bot_radius = .5
+inner_bot_radius = inner_top_radius
 N = 25
 
 #coordinates for defining the domain
 b_ox = 0.
 b_oy = 0.
-b_oz = -1.
+b_oz = 0.
 
 t_ox = 0.
 t_oy = 0.
-t_oz = 1.
+t_oz = np.pi/2.
 
 b_ix = 0.
 b_iy = 0.
-b_iz = -1.
+b_iz = 0.
 
 t_ix = 0.
 t_iy = 0.
-t_iz = 1.
+t_iz = np.pi/2.
 
 height = t_iz - b_iz #hieght of the cylinder
 
@@ -39,10 +39,10 @@ domain = Cylinder(Point(b_ox, b_oy, b_oz), Point(t_ox, t_oy, t_oz), outer_top_ra
 mesh = generate_mesh ( domain, N )
 
 #Parameters
-mu = .0000055
-tau = .0000001
-nu = .001
-omega = 4.
+mu = .55
+tau = .1
+nu = .0001
+omega = 2. #angular velocity
 
 #Time info
 t_init = 0.0
@@ -51,11 +51,14 @@ dt = .01
 t_num = int((t_final - t_init)/dt)
 t = t_init
 
-#Reynolds number info
+#Reynolds and Taylor number info
 radius_ratio = inner_bot_radius/outer_bot_radius
 d =  outer_bot_radius - inner_bot_radius
 aspect_ratio =  height/d
-Re = d*omega/nu
+rot_velocity = inner_top_radius*omega
+Re = inner_bot_radius*d*omega/nu
+Ta = Re**2 *(1. - 1./radius_ratio)
+
 
 #Mark subdomains for bounadry conditions we use 
 
@@ -167,7 +170,7 @@ kn = Function(K) #TKE solution vector at time n
 knPlus1 = Function(K) #TKE solution vector at time n+1
 
 #Define boundary conditions for the velocity equation
-noslip_u_inner = Expression(("omega*r*x[1]/r", "omega*r*-1*x[0]/r","0.0"), degree=2, r = inner_bot_radius,omega = omega)
+noslip_u_inner = Expression(("rot_velocity*x[1]/r", "rot_velocity*-1*x[0]/r","0.0"), degree=2, r = inner_bot_radius,rot_velocity =rot_velocity)
 noslip_u_outer = Constant((0.0, 0.0, 0.0))
 originpoint = OriginPoint()
 bc_inner= DirichletBC(W.sub(0),noslip_u_inner,sub_domains,1) #boundary condition for inner cylinder
@@ -213,6 +216,11 @@ k_rhs = (1./dt)*inner(kn,phi)*dx + np.sqrt(2.0)*mu*tau*kn*inner(.5*(nabla_grad(u
 #Filenames for saving plots
 velocity_paraview_file = File("paraview_plotting/3d_Taylor_Couette.pvd")
 
+
+#Arrays for holding statistics
+nu_eff_arr = np.zeros(t_num)
+VgradNorm[k_count-k_init] = np.zeros(t_num)
+
 for jj in range(0,t_num):
     t = t + dt
     print('Numerical Time Level: t = '+ str(t))
@@ -244,6 +252,24 @@ for jj in range(0,t_num):
     #Save solution
         velocity_paraview_file << (unPlus1,t)
 
+
+
+    #Calculate Turbulence Statistics
+    VgradNorm[jj] = sqrt(assemble(inner(.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T),.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T))*dx))
+    nu_eff_arr[jj] = assemble((nu+np.sqrt(2.0)*mu*knPlus1*tau)*inner(.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T),.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T))*dx)/pow(VgradNorm[jj],2.0)
+    # Nu_Effective[k_count-k_init] = assemble((nu+np.sqrt(2.0)*mu*knPlus1*tau)*inner(.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T),.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T))*dx)/pow(VgradNorm[k_count-k_init],2.0)
+    # nu_effective.write('%.10e&%.10e\n'%(t,Nu_Effective[k_count-k_init]))
+    # Intensity_Model[k_count-k_init] = 2*assemble(knPlus1*dx)/pow(VNorm[k_count-k_init],2.0)
+    # intensity_model.write('%.10e&%.10e\n'%(t,Intensity_Model[k_count-k_init]))
+    # Viscosity_Ratio[k_count-k_init] = assemble(np.sqrt(2.0)*mu_2*knPlus1*tau*inner(.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T),.5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T))*dx)/(2*nu*pow(VgradNorm[k_count-k_init],2.0))
+    # viscosity_ratio.write('%.10e&%.10e\n'%(t,Viscosity_Ratio[k_count-k_init]))
+    # Taylor_Microscale[k_count-k_init] = pow(pow(VgradNorm[k_count-k_init],2)/pow(VNorm[k_count-k_init],2),-.5)
+    # taylor_microscale.write('%.10e&%.10e\n'%(t,Taylor_Microscale[k_count-k_init]))
+    # Avg_l[k_count-k_init] = pow((1./(.99*np.pi))*assemble(2.0*tau*knPlus1*dx),.5)
+    # avg_l.write('%.10e&%.10e\n'%(t,Avg_l[k_count-k_init]))
+    # Avg_Turbulent_nu[k_count-k_init] = (1./(.99*np.pi))*assemble(np.sqrt(2.0)*mu_2*tau*knPlus1*dx)
+    # avg_turbulent_nu.write('%.10e&%.10e\n'%(t,Avg_Turbulent_nu[k_count-k_init]))
+​
     #Assign values for next time step
     un.assign(unPlus1)
     kn.assign(knPlus1)
