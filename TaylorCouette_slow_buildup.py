@@ -27,14 +27,15 @@ solver.parameters['maximum_iterations'] = MAX_ITERS
 
 #####THINGS I HAVE BEEN CHANGING A LOT LATELY
 #DOF/timestep size
-N = 45
+N = 15
 dt = .01
 #Final speed (how we vary Taylor number)
 omega = 4.
 #How fast we increase inner radius
-x = 4. #That is, it takes x seconds to reach full speed
+x = 1. #That is, it takes x seconds to reach full speed
 meshrefine = 1 # 0,1, or 2, how much we refine the mesh on the boundary, generally I just make this 1, 2 makes dof INSANE
-
+refine1 = .03#how far in we refine the first time
+refine2 = .01 #another refining thing
 #Print out choices so we can see what is running
 print("N equals " + str(N))
 print("dt equals " + str(dt))
@@ -42,7 +43,7 @@ print("omega equals " + str(omega))
 print("x equals " + str(x))
 #Filenames for saving plots (So we can tell what version we're looking at and dont write over things on accident)
 velocity_paraview_file = File("plot_"+str(dt)+"_"+str(N)+"_"+str(omega)+"_"+str(meshrefine)+"_bridge_"+str(x)+"/3d_TC_sb_"+str(dt)+"_"+str(N)+"_"+str(omega)+".pvd")
-
+q_file = File("plot_"+str(dt)+"_"+str(N)+"_"+str(omega)+"_"+str(meshrefine)+"_bridge_"+str(x)+"/q.pvd")
 
 #how often do we save to paraview?
 snapspersec = int(1./dt) #this many timesteps per second
@@ -115,18 +116,18 @@ if (meshrefine > .5): #technically just needs to be greater than 0 but numerical
 
     class SmallInterest(SubDomain):
         def inside(self, x, on_boundary):
-            return (x[1]**2 + x[0]**2 < (inner_top_radius+.05)**2 or x[1]**2 + x[0]**2 > (outer_top_radius-.05)**2)
+            return (x[1]**2 + x[0]**2 < (inner_top_radius+refine1)**2 or x[1]**2 + x[0]**2 > (outer_top_radius-refine1)**2)
 
 
     interest = SmallInterest()
     interest.mark(sub_domains_bool,True)
     mesh = refine(mesh,sub_domains_bool)
     print("okie dokie all good mesh is refined")
-
+    test_file = File("test_plot/test_N_"+str(N)+"_r1_" + str(refine1)+".pvd") #This gives us a look at the mesh before we run it
     if (meshrefine > 1.5):
         class BigInterest(SubDomain):
             def inside(self, x, on_boundary):
-                return (x[1]**2 + x[0]**2 < (inner_top_radius+.01)**2 or x[1]**2 + x[0]**2 > (outer_top_radius-.01)**2)
+                return (x[1]**2 + x[0]**2 < (inner_top_radius+refine2)**2 or x[1]**2 + x[0]**2 > (outer_top_radius-refine2)**2)
         #
         sub_domains_bool2 = MeshFunction("bool",mesh,mesh.topology().dim() - 1)
         sub_domains_bool2.set_all(False)
@@ -134,11 +135,23 @@ if (meshrefine > .5): #technically just needs to be greater than 0 but numerical
         interest.mark(sub_domains_bool2,True)
         mesh = refine(mesh,sub_domains_bool2)
         print("okie dokie all good mesh is refined AGAIN wow your if statement actually worked")
+        test_file = File("test_plot/test_N_"+str(N)+"_r1_" + str(refine1)+"_r2_"+str(refine2)+".pvd") #gives us a look at the mesh before we run it too long
 
 
+#Moved up so
+X_test = VectorFunctionSpace(mesh,"CG",2)
+Q_test = FunctionSpace(mesh,"CG",1)
 
 
+#Print the total number of degrees of freedom
+vdof = X_test.dim()
+pdof = Q_test.dim()
+print("The number of velocity DOFs is:" + str(vdof))
+print("The number of pressure DOFs is:" + str(pdof))
 
+test=Function(X_test)
+test_file<<test
+print("Now can go look at the mesh")
 
 #Parameters
 mu = .0000055
@@ -236,15 +249,7 @@ K_h = FiniteElement("Lagrange", mesh.ufl_cell(), 1) #TKE space
 W = FunctionSpace(mesh,MixedElement([V_h,Q_h]),constrained_domain=PeriodicBoundary())
 K = FunctionSpace(mesh,K_h,constrained_domain=PeriodicBoundary())
 
-X_test = VectorFunctionSpace(mesh,"CG",2)
-Q_test = FunctionSpace(mesh,"CG",1)
 
-
-#Print the total number of degrees of freedom
-vdof = X_test.dim()
-pdof = Q_test.dim()
-print("The number of velocity DOFs is:" + str(vdof))
-print("The number of pressure DOFs is:" + str(pdof))
 
 #Set up trial and test functions for all parts
 (u,p) = TrialFunctions(W)
@@ -318,6 +323,8 @@ Ak = None
 Bu = None
 Bk = None
 
+
+
 for jj in range(0,t_num):
     t = t + dt
     print('Numerical Time Level: t = '+ str(t))
@@ -338,6 +345,22 @@ for jj in range(0,t_num):
     #Matrix Assembly for the k equation
     Ak = assemble(k_lhs)
     Bk = assemble(k_rhs)
+
+    #Latest attempt at this goddammnm q thing
+    Omega = .5*(nabla_grad(unPlus1)+nabla_grad(unPlus1).T) #symmetric part of the gradient (3x3 matrix with functions as entries)
+    S = .5*(nabla_grad(unPlus1)-nabla_grad(unPlus1).T) #skew symmetric part (also 3x3 matrix)
+    D = nabla_grad(unPlus1)
+    #Q is apparently .5*||Omega||^2 - ||S||^2 #these norms are scalar functions?
+    #According to what victor sent me
+    #unsure if there are supposed to be parenthesis, as it looks like other definitions have it that way
+    #That is the least of my problems though
+    #Q also is .5*tr(D)^2-tr(D^2) where
+    #This should give me a scalar function
+    #Except I cannot make this work syntax-wise
+
+
+    Q = .5*tr(D)^2-tr(D^2) #it would be too much to ask for this to work
+
 
     #Application of boundary conditions for the k equation
     [bc.apply(Ak,Bk) for bc in bcs_k]
