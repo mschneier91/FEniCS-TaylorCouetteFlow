@@ -27,23 +27,23 @@ solver.parameters['maximum_iterations'] = MAX_ITERS
 
 #####THINGS I HAVE BEEN CHANGING A LOT LATELY
 #DOF/timestep size
-N = 42
+N = 40
 dt = .005
 #Final speed (how we vary Taylor number)
-omega = 3.2
+omega = 1.072
 #How fast we increase inner radius
-x = 1. #That is, it takes x seconds to reach full speed
+x = .5 #That is, it takes x seconds to reach full speed
 meshrefine = 0 # 0,1, or 2, how much we refine the mesh on the boundary, generally I just make this 1, 2 makes dof INSANE
-refine1 = .05#how far in we refine the first time
-refine2 = .02 #another refining thing
+refine1 = .01#how far in we refine the first time
+refine2 = .01 #another refining thing
 #Print out choices so we can see what is running
 print("N equals " + str(N))
 print("dt equals " + str(dt))
 print("omega equals " + str(omega))
 print("x equals " + str(x))
 #Filenames for saving plots (So we can tell what version we're looking at and dont write over things on accident)
-velocity_paraview_file = File("plot_"+str(dt)+"_"+str(N)+"_"+str(omega)+"_"+str(meshrefine)+"_bridge_"+str(x)+"/3d_TC_sb_"+str(dt)+"_"+str(N)+"_"+str(omega)+".pvd")
-q_file = File("plot_"+str(dt)+"_"+str(N)+"_"+str(omega)+"_"+str(meshrefine)+"_bridge_"+str(x)+"/q.pvd")
+velocity_paraview_file = File("plot_"+str(dt)+"_"+str(N)+"_"+str(omega)+"_"+str(meshrefine)+"/3d_TC_sb_"+str(dt)+"_"+str(N)+"_"+str(omega)+".pvd")
+# q_file = File("plot_"+str(dt)+"_"+str(N)+"_"+str(omega)+"_"+str(meshrefine)+"_bridge_"+str(x)+"/q.pvd")
 
 #how often do we save to paraview?
 snapspersec = int(1./dt) #this many timesteps per second
@@ -81,10 +81,10 @@ mint_val = smooth_bridge(t)
 
 
 #Construct Mesh
-outer_top_radius =2.611
-outer_bot_radius = 2.611
-inner_top_radius = 1.611
-inner_bot_radius = 1.611
+outer_top_radius =1.2
+inner_top_radius = .7
+outer_bot_radius = outer_top_radius
+inner_bot_radius = inner_top_radius
 
 
 #coordinates for defining the domain
@@ -94,7 +94,7 @@ b_oz = 0.
 
 t_ox = 0.
 t_oy = 0.
-t_oz = 4.58
+t_oz = 2.2
 
 b_ix = 0.
 b_iy = 0.
@@ -102,7 +102,7 @@ b_iz = 0.
 
 t_ix = 0.
 t_iy = 0.
-t_iz = 4.58
+t_iz = 2.2
 
 height = t_iz - b_iz #hieght of the cylinder
 
@@ -205,13 +205,13 @@ class PeriodicBoundary(SubDomain):
 #Sub domain for the inner cylinder
 class Inner_cyl(SubDomain):
     def inside(self, x, on_boundary):
-        return x[0]**2 + x[1]**2 <= inner_top_radius**2 +10**-1 and on_boundary
+        return x[0]**2 + x[1]**2 <= inner_top_radius**2 +10**-2 and on_boundary
 
 #Sub domain for the outer cylinder
 #The tolerance had to be set much differently for this condition for some reason, double check this when swithching the mesh
 class Outer_cyl(SubDomain):
     def inside(self, x, on_boundary):
-        return outer_top_radius**2 - 10**-1 <= x[0]**2 + x[1]**2 and on_boundary
+        return outer_top_radius**2 - 10**-2 <= x[0]**2 + x[1]**2 and on_boundary
 
 #Specify a point on the boundary for the pressures
 #I need to check this later
@@ -281,13 +281,19 @@ knPlus1 = Function(K) #TKE solution vector at time n+1
 
 
 #Define boundary conditions for the velocity equation
-noslip_u_inner = Expression(("mint*omega*r*x[1]/r", "mint*omega*r*-1*x[0]/r","0.0"), mint = 0.0,degree=4, r = inner_bot_radius,omega = omega)
-noslip_u_outer = Constant((0.0, 0.0, 0.0))
+
+
+noslip_u_inner = Constant((0.0, 0.0, 0.0))
+noslip_u_outer = Expression(("mint*omega*r*x[1]/r", "mint*omega*r*-1*x[0]/r","0.0"), mint = 0.0,degree=4, r = outer_bot_radius,omega = omega)
+
+
 originpoint = OriginPoint()
 bc_inner= DirichletBC(W.sub(0),noslip_u_inner,sub_domains,1) #boundary condition for inner cylinder
 bc_outer = DirichletBC(W.sub(0),noslip_u_outer,sub_domains,2) #boundary condition for outer cylinder
 bcp = DirichletBC(W.sub(1), 0.0, originpoint, 'pointwise') #specify a point on the boundary for the pressure
 bcs_u = [bc_outer,bc_inner,bcp]
+
+
 
 #Define boundary conditions for the k equation
 bc_inner_k = DirichletBC(K,0.0,sub_domains,1) #boundary condition for k on the inner cylinder
@@ -333,29 +339,23 @@ Bu = None
 Bk = None
 
 #Things we plot!!!
-#total KE at every timestep (deceptively named? Not turbulent KE)
-TKE = np.zeros((t_num))
-
 
 #Location variables, probably more than we need if we're honest but I'm not taking chances
-donutPoints = 100 #number of points we take along varying theta (points along donut shaped cross sections)
+donutPoints = 5 #number of points we take along varying theta (points along donut shaped cross sections)
+zpoints = 5 #number of points we take along z axis
+rpoints = 100
+
+r = np.zeros((rpoints))
 theta = np.zeros((donutPoints))
-xy = np.zeros((2,donutPoints))
-zpoints = 150 #number of points we take along z axis
-avg = np.zeros((zpoints)) #average at one timestep, we save the last timestep (as god willing we've got some sort of fully evolved flow)
-avgavg = np.zeros((zpoints)) #average over donut, over time, store here
 z = np.zeros((zpoints))
-averageCount = 0#keep track of how many things we've added to average
-
-
 
 
 for i in range(0,donutPoints):
     theta[i] = i*(2*Pi)/donutPoints
-    xy[0,i] = .5*(outer_top_radius+inner_top_radius)*cos(theta[i])
-    xy[1,i] = .5*(outer_top_radius+inner_top_radius)*sin(theta[i])
 for i in range(0,zpoints):
     z[i] = b_iz+t_iz*i/zpoints
+for i in range(0,rpoints):
+    r[i] = inner_top_radius+(outer_top_radius-inner_top_radius)*(i+10)/(rpoints+20)
 
 
 take_snap = 10
@@ -367,7 +367,7 @@ for jj in range(0,t_num):
     Au = assemble(u_lhs)
     Bu = assemble(u_rhs)
     mint_val = smooth_bridge(t)
-    noslip_u_inner.mint = mint_val
+    noslip_u_outer.mint = mint_val
 
     #Application of boundary conditions for the u equation
     [bc.apply(Au,Bu) for bc in bcs_u]
@@ -376,7 +376,6 @@ for jj in range(0,t_num):
     #Solution of the u equation
     (unPlus1,pnPlus1) = w_.split(True)
     unPlus1.vector()[:] = unPlus1.vector()[:] -(1./3.)*(unPlus1.vector()[:]-2*un.vector()[:]+unMinus1.vector()[:])
-    TKE[jj]=  .5*(assemble(inner(unPlus1,unPlus1)*dx))
 
     #Matrix Assembly for the k equation
     Ak = assemble(k_lhs)
@@ -392,20 +391,41 @@ for jj in range(0,t_num):
     #Save solution, also add another round of donut averages if we've let the flow go for a bit
 
     if(jj%frameRate == 0):
-        print(TKE[jj])
         velocity_paraview_file << (unPlus1,t)
-    if(jj%take_snap == 0):
-        if t>10:
-            averageCount = averageCount+1
-            currentavg = np.zeros((zpoints))
+
+    if t>5:
+        for i in range(0,donutPoints):
             for j in range(0,zpoints):
-                for i in range(0,donutPoints):
-                    u1 = unPlus1(xy[0,i],xy[1,i] ,z[j])[0] #velocity in x
-                    u2 = unPlus1(xy[0,i],xy[1,i] ,z[j])[1] #velocity in y
-                    v = u1*cos(theta[i])+u2*sin(theta[i])
-                    currentavg[j]= currentavg[j] + (1./donutPoints)*v
-                avgavg[j] = avgavg[j]+currentavg[j]
-            np.savetxt('Avg_z/average'+str(t)+ '.txt',currentavg)
+                u_r_vals = np.zeros(rpoints)
+                u_th_vals = np.zeros(rpoints)
+                u_z_vals = np.zeros(rpoints)
+
+                for k in range(0,rpoints):
+                    # print("r "+str(r[k]))
+                    # print("theta "+str(cos(theta[i])))
+                    # print("x "+str(r[k]*cos(theta[i])))
+                    # print("y "+str(r[k]*sin(theta[i])))
+                    # print("z "+str(z[j]))
+                    uvw = unPlus1(r[k]*cos(theta[i]), r[k]*sin(theta[i]),z[j])
+                    u_r_vals[k] = uvw[0]*cos(theta[i])+uvw[1]*sin(theta[i])
+                    u_th_vals[k]= uvw[1]*cos(theta[i])-uvw[0]*sin(theta[i])
+                    u_z_vals[k]= uvw[2]
+
+
+                plt.figure(1)
+                plt.plot(r,u_r_vals,"b",r,u_th_vals,"k",r,u_z_vals,"r", label=r"velocity plots",linewidth =.5 )
+                plt.xlabel("r")
+                plt.ylabel("magnitude")
+
+                plt.savefig("i_"+str(i)+"_j_"+str(j))
+                plt.close()
+
+                np.savetxt("i_"+str(i)+"_j_"+str(j)+"UR.txt", u_r_vals)
+                np.savetxt("i_"+str(i)+"_j_"+str(j)+"UTh.txt", u_th_vals)
+                np.savetxt("i_"+str(i)+"_j_"+str(j)+"UZ.txt", u_z_vals)
+
+
+        exit()
     #Assign values for next time step
     unMinus1.assign(un)
     un.assign(unPlus1)
